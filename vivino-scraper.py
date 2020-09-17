@@ -4,11 +4,18 @@ Usage: python scrape_imagelinks.py --url <url of the race album you want to scra
 
 # import the necessary packages
 from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.support import expected_conditions
+from selenium.webdriver.support.wait import WebDriverWait
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
 import datetime
 import time
 import argparse
 import os
 from pip._vendor import requests
+import asyncio
 
 #Define the argument parser to read in the URL
 parser = argparse.ArgumentParser()
@@ -28,8 +35,13 @@ options.add_argument("--start-maximized")
 driver = webdriver.Chrome(chrome_options=options)
 driver.get(url)
 
-time.sleep(2)
+time.sleep(1)
 
+driver.find_element(By.ID, "1").click()
+driver.find_element(By.CSS_SELECTOR, ".responsiveDropdownMenu__label--3fijz").click()
+driver.find_element(By.ID, "desc__price").click()
+
+time.sleep(5)
 
 dir_name = 'wine'
 if not os.path.exists(dir_name):
@@ -40,44 +52,67 @@ if not os.path.exists(dir_name):
     else:
         print ("[INFO] Successfully created the directory {} ".format(os.path.abspath(dir_name)))
 
-rating_tags = driver.find_elements_by_tag_name('div')
-rating_tag = None
+for i in range(50, 34, -1):
+    dir_name = "wine/" + str((i / 10.0))
 
-for potential_rating_tag in rating_tags:
-    if ("vivinoRatingWide__averageValue--1zL_5" in potential_rating_tag.get_attribute("class")):
-        rating_tag = potential_rating_tag
-        break
-
-
-print(rating_tag.text)
-
-i = 0
-current_rating = 1000
-for j in range(1000):
     try:
-        link_tag = rating_tag.find_element_by_xpath('../../../../../div/div/a/div/img')
+        os.mkdir(dir_name)
     except:
-        continue
+        pass
+
+async def save_image(rating, link, i):
+    try:
+        response = requests.get(link)
+    except:
+        time.sleep(1)
     
-    response = requests.get(link_tag.get_attribute('src'))
+    try:
+        file = open("wine/" + rating + "/" + str(i) + ".png", "wb")
+        file.write(response.content)
+        file.close()    
+    except:
+        pass
 
-    if (float(rating_tag.text) < current_rating):
-        current_rating = float(rating_tag.text)
-        os.mkdir("wine/" + rating_tag.text)
+tasks = []
 
-    file = open("wine/" + rating_tag.text + "/" + str(i) + ".png", "wb")
-    file.write(response.content)
-    file.close()    
+def process_element(i):
+    worked = False
+    while (not worked):
+        try:
+            rating_tag = driver.find_element_by_class_name('vivinoRatingWide__averageValue--1zL_5')
+            link_tag = driver.find_element_by_xpath('//div/div/a/div/img')
 
-    i = i + 1
-    
-    rating_tag = rating_tag.find_element_by_xpath('../../../../../..')
+            worked = True
+        except:
+            pass
 
-    driver.execute_script("""
-        var element = document.querySelector('.explorerCard__explorerCard--3Q7_0');
-        console.log(element)
-        if (element)
-            element.parentNode.removeChild(element);
-        """) 
+    return asyncio.create_task(save_image(rating_tag.text, link_tag.get_attribute('src'), i))
 
-    rating_tag = rating_tag.find_element_by_class_name('vivinoRatingWide__averageValue--1zL_5')
+async def gatherTasks(number, stepSize):
+    tasks = []
+
+    for j in range(number):
+        print(str(j))
+        tasks.append(process_element(j))
+        
+        worked = False
+        while (not worked):
+            try:
+                driver.execute_script("""
+                    var element = document.querySelector('.explorerCard__explorerCard--3Q7_0');
+                    console.log(element)
+                    if (element) element.parentNode.removeChild(element);
+                    """) 
+                worked = True
+                time.sleep(0.01)
+            except:
+                time.sleep(1)
+
+        if (j != 0 and j % stepSize == 0):
+            for l in range(stepSize):
+                await tasks[l]
+            
+            tasks = []
+            time.sleep(0.5)
+
+asyncio.run(gatherTasks(27000, 20))
